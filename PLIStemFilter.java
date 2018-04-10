@@ -16,7 +16,7 @@ public class PLIStemFilter extends TokenFilter {
 	@Override
 	public boolean incrementToken() throws IOException {
 		if(input.incrementToken()) {
-			if(!keywordAtt.isKeyword()) termAtt.setLength(stemmer.stem(termAtt.buffer(), termAtt.length()));
+			if(!keywordAtt.isKeyword() && stemmer.stem(termAtt.buffer(), termAtt.length())) termAtt.copyBuffer(stemmer.getResultBuffer(),0,stemmer.getResultLength());
 			return true;
 		} else {
 			return false;
