@@ -1,15 +1,21 @@
 import static org.apache.lucene.analysis.util.StemmerUtil.*;
 
-import java.nio.file.Paths;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
 
-import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.Fields;
-import org.apache.lucene.index.IndexReader;
-import org.apache.lucene.index.MultiFields;
-import org.apache.lucene.index.Terms;
-import org.apache.lucene.index.TermsEnum;
-import org.apache.lucene.store.FSDirectory;
+import javax.xml.parsers.*;
+import org.w3c.dom.*;
+
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.core.StopAnalyzer;
+import org.apache.lucene.document.*;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.index.*;
+import org.apache.lucene.index.IndexWriterConfig.OpenMode;
+import org.apache.lucene.store.*;
 import org.apache.lucene.util.BytesRef;
 
 public class PLIStemmer {
@@ -31,7 +37,7 @@ public class PLIStemmer {
 				if(i==0 && j==0) D[i][j]=0;
 				else if(i==0) D[i][j] = j;
 				else if(j==0) D[i][j] = i;
-				else if(buffer[i-1] == prefixMatchTerm[j-1]) D[i][j] = D[i-1][j-1];
+				else if(buffer[i-1] == prefixMatchTerm[j-1]) D[i][j] = Math.min(D[i-1][j-1], Math.min(D[i-1][j]+1, D[i][j-1]+1));
 				else D[i][j] = Math.min(D[i-1][j]+1, Math.min(D[i][j-1]+1, D[i-1][j-1]+2));
 			}
 		}
@@ -162,23 +168,106 @@ public class PLIStemmer {
 		    	String term = new String(bytref.bytes, bytref.offset, bytref.length);
 		    	this.allTerms.add(term);
 		    }
-		    long  count = 0;
-		    for(String term:allTerms) {
-		    	System.out.println(term);
-		    	count++;
-		    }
-		    System.out.println(count);
+//		    long  count = 0;
+//		    for(String term:allTerms) {
+//		    	if(stem(term.toCharArray(), term.length())) System.out.println(term + " : " + String.copyValueOf(getResultBuffer()));
+//		    	count++;
+//		    }
+//		    System.out.println(count);
 		} catch(Exception e) {
 			System.out.println(e);
 		}
 	}
-	//TODO: Remove from it once done testing
-	public static void main(String[] args) {
-		String test = "भारतीय";
-		PLIStemmer s = new PLIStemmer();
-		if(s.stem(test.toCharArray(), test.length())) {
-			String result = new String(s.getResultBuffer());
-			System.out.println(result);
+	
+	PLIStemmer(String docsPath, String language) {
+		k = 3;
+		b = new char[50];
+		allTerms = new HashSet<String>();
+		/***********************************Indexing in RAM Directory to extract terms*******************/
+		final  Path docsDir = Paths.get(docsPath);
+		try {
+			Directory dir = new RAMDirectory();
+//			Directory dir = FSDirectory.open(Paths.get("hiIndex"));
+			
+			Analyzer analyzer;
+			
+			if(language == "hindi") analyzer = new CorpusAnalyzer();
+			else analyzer = new StopAnalyzer();
+			
+			IndexWriterConfig iwc = new IndexWriterConfig(analyzer);
+			iwc.setOpenMode(OpenMode.CREATE);
+			IndexWriter writer = new IndexWriter(dir, iwc);
+			
+			indexDocs(writer, docsDir);
+			
+			writer.close();
+			
+			IndexReader reader = DirectoryReader.open(dir);
+			
+			Fields fields = MultiFields.getFields(reader);
+		    Terms terms = fields.terms("contents");
+		    TermsEnum iterator = terms.iterator();
+		    BytesRef bytref = null;
+		    while((bytref = iterator.next()) != null) {
+		    	String term = new String(bytref.bytes, bytref.offset, bytref.length);
+		    	this.allTerms.add(term);
+		    }
+		    
+		    reader.close();
+		    dir.close();
+		    
+		    for(String term: allTerms) {
+		    	if(stem(term.toCharArray(), term.length())) System.out.println(term + " : " + String.copyValueOf(getResultBuffer()));
+		    	else System.out.println(term);
+		    }
+		    
+		} catch(Exception e) {
+			e.printStackTrace();
 		}
 	}
+	
+	private static void indexDocs(IndexWriter writer, Path path) throws IOException {
+		if(Files.isDirectory(path)) {
+			Files.walkFileTree(path, new SimpleFileVisitor<Path>() {
+				@Override
+				public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+					try {
+						indexDoc(writer,file);
+					} catch (IOException e) {
+						System.out.println("Exception occured while walking file tree " + e);
+					}
+					return FileVisitResult.CONTINUE;
+				}
+			});
+		} else {
+			indexDoc(writer,path);
+		}
+	}
+
+	private static void indexDoc(IndexWriter writer, Path file) throws IOException {
+		try {
+			DocumentBuilderFactory dbFactory = DocumentBuilderFactory.newInstance();
+			DocumentBuilder dBuilder = dbFactory.newDocumentBuilder();
+			org.w3c.dom.Document xmldoc = dBuilder.parse(new File(file.toString()));
+			xmldoc.getDocumentElement().normalize();
+			
+			Document doc = new Document();
+			
+			Field pathField = new StringField("path", xmldoc.getElementsByTagName("DOCNO").item(0).getTextContent(), Field.Store.YES);
+			doc.add(pathField);
+			
+			doc.add(new TextField("contents", xmldoc.getElementsByTagName("TEXT").item(0).getTextContent(), Field.Store.NO));
+			
+			writer.addDocument(doc);
+			
+		} catch(Exception e) {
+			System.out.println("Exception while indexing files " + e);
+		}
+	}
+	
+	
+//	//TODO: Remove from it once done testing
+//	public static void main(String[] args) {
+//		PLIStemmer s = new PLIStemmer("hi.doc.2010-copy","hindi");
+//	}
 }
