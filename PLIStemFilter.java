@@ -7,7 +7,7 @@ import org.apache.lucene.analysis.tokenattributes.*;
 public class PLIStemFilter extends TokenFilter {
 	private final CharTermAttribute termAtt = addAttribute(CharTermAttribute.class);
 	private final KeywordAttribute keywordAtt = addAttribute(KeywordAttribute.class);
-	private final PLIStemmer stemmer = new PLIStemmer();
+	private final PLIStemmer stemmer = new PLIStemmer("enIndex");
 	
 	public PLIStemFilter(TokenStream input) {
 		super(input);

@@ -23,6 +23,8 @@ public class PLIStemmer {
 	private int i;	//Length of stemmed word
 	private int k;	//How many characters to match
 	private Set<String> allTerms;	//A set that contains all terms
+	private Map<String, Set<String> > prefixMatchMap;
+	private Map<String, String> stemmedWords;
 	
 	public int getResultLength() { return i; }
 	
@@ -72,19 +74,21 @@ public class PLIStemmer {
 	}
 	
 	public boolean stem(char[] buffer, int len) {
-		if(len < k) return false;
+		if(len < k || String.copyValueOf(buffer,0,len).matches("-?\\d+(\\,\\d+)*(\\.\\d+)?")) return false;
 		
-		Set<String> prefixMatchSet = new HashSet<String>();
+		if(stemmedWords.get(String.copyValueOf(buffer,0,len)) != null) {
+			b = stemmedWords.get(String.valueOf(buffer,0,len)).toCharArray();
+			i = stemmedWords.get(String.valueOf(buffer,0,len)).length();
+			return true;
+		}
+		
+		if(prefixMatchMap.get(String.copyValueOf(buffer, 0, k)) == null) return false;
+		
+		Set<String> prefixMatchSet = prefixMatchMap.get(String.copyValueOf(buffer, 0, k));
 		//Following terms are from paper this is based on
 		Vector<String> gammaStar = new Vector<String>();
 		Vector<Integer> EDStar = new Vector<Integer>();
 		Vector<Integer> LCSStar = new Vector<Integer>();
-		
-		/***************************Get terms having first k letters common***************************/
-		for(String term:allTerms) {
-			if(startsWith(term.toCharArray(), term.length(), String.copyValueOf(buffer, 0, k))) prefixMatchSet.add(term);
-		}
-		/*********************************************************************************************/
 		
 		int n = prefixMatchSet.size();
 		int[] ED = new int[n];
@@ -113,6 +117,7 @@ public class PLIStemmer {
 		}
 		
 		if(candidates.size() == 1) {
+			stemmedWords.put(String.copyValueOf(buffer,0,len), candidates.get(0));
 			b = candidates.get(0).toCharArray();
 			i = candidates.get(0).length();
 			return true;
@@ -130,8 +135,9 @@ public class PLIStemmer {
 			}
 			
 			if(smallest.size() == 1) {
+				stemmedWords.put(String.copyValueOf(buffer,0,len), smallest.get(0));
 				b = smallest.get(0).toCharArray();
-				i = candidates.get(0).length();
+				i = smallest.get(0).length();
 				return true;
 			} else {
 				String finalCandidate = "";
@@ -143,6 +149,7 @@ public class PLIStemmer {
 						finalCandidate = smallest.get(index);
 					}
 				}
+				stemmedWords.put(String.copyValueOf(buffer,0,len), finalCandidate);
 				b = finalCandidate.toCharArray();
 				i = finalCandidate.length();
 				return true;
@@ -153,27 +160,45 @@ public class PLIStemmer {
 		
 	}
 	
-	PLIStemmer() {
+	PLIStemmer(String indexPath) {
 		try {
 			k = 3;
 			b = new char[50];
 			allTerms = new HashSet<String>();
-			String indexPath = "hiIndex";
+			prefixMatchMap = new HashMap<String, Set<String> >();
+			stemmedWords = new HashMap<String, String>();
 			IndexReader reader = DirectoryReader.open(FSDirectory.open(Paths.get(indexPath)));
 		    Fields fields = MultiFields.getFields(reader);
 		    Terms terms = fields.terms("contents");
 		    TermsEnum iterator = terms.iterator();
 		    BytesRef bytref = null;
+		    
 		    while((bytref = iterator.next()) != null) {
 		    	String term = new String(bytref.bytes, bytref.offset, bytref.length);
 		    	this.allTerms.add(term);
+		    	if(term.length() < k || term.matches("-?\\d+(\\,\\d+)*(\\.\\d+)?")) continue;
+		    	if(prefixMatchMap.get(term.substring(0, k)) == null) {
+		    		Set<String> temp = new HashSet<String>();
+		    		prefixMatchMap.put(term.substring(0,k), temp);
+		    	}
+		    	prefixMatchMap.get(term.substring(0,k)).add(term);
 		    }
-//		    long  count = 0;
-//		    for(String term:allTerms) {
+		    
+//		    long count = 0;
+//		    for(String term: allTerms) {
 //		    	if(stem(term.toCharArray(), term.length())) System.out.println(term + " : " + String.copyValueOf(getResultBuffer()));
+//		    	else System.out.println(term);
 //		    	count++;
 //		    }
+		    
+//		    long count2 = 0;
+//		    for(Map.Entry<String, String> entry : stemmedWords.entrySet()) {
+//		    	System.out.println(entry.getKey() + ":" + entry.getValue());
+//		    	count2++;
+//		    }
 //		    System.out.println(count);
+//		    System.out.println(count2);
+		    
 		} catch(Exception e) {
 			System.out.println(e);
 		}
@@ -183,11 +208,13 @@ public class PLIStemmer {
 		k = 3;
 		b = new char[50];
 		allTerms = new HashSet<String>();
+		prefixMatchMap = new HashMap<String, Set<String> >();
+		stemmedWords = new HashMap<String, String>();
 		/***********************************Indexing in RAM Directory to extract terms*******************/
 		final  Path docsDir = Paths.get(docsPath);
 		try {
-			Directory dir = new RAMDirectory();
-//			Directory dir = FSDirectory.open(Paths.get("hiIndex"));
+//			Directory dir = new RAMDirectory();
+			Directory dir = FSDirectory.open(Paths.get("enWikiIndex"));
 			
 			Analyzer analyzer;
 			
@@ -211,6 +238,12 @@ public class PLIStemmer {
 		    while((bytref = iterator.next()) != null) {
 		    	String term = new String(bytref.bytes, bytref.offset, bytref.length);
 		    	this.allTerms.add(term);
+		    	if(term.length() < k || term.matches("-?\\d+(\\,\\d+)*(\\.\\d+)?")) continue;
+		    	if(prefixMatchMap.get(term.substring(0, k)) == null) {
+		    		Set<String> temp = new HashSet<String>();
+		    		prefixMatchMap.put(term.substring(0,k), temp);
+		    	}
+		    	prefixMatchMap.get(term.substring(0,k)).add(term);
 		    }
 		    
 		    reader.close();
@@ -265,9 +298,8 @@ public class PLIStemmer {
 		}
 	}
 	
+	public static void main(String[] args) {
+		PLIStemmer s = new PLIStemmer("wiki_en","english");
+	}
 	
-//	//TODO: Remove from it once done testing
-//	public static void main(String[] args) {
-//		PLIStemmer s = new PLIStemmer("hi.doc.2010-copy","hindi");
-//	}
 }
